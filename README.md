@@ -1,0 +1,1 @@
+Very simple project to highlight encrypting values and storing within Preferences DataStore.
