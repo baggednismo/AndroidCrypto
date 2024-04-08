@@ -7,31 +7,38 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-const val USER_PREFERENCES_NAME = "user_preferences"
-
-data class UserPreferences(
-    val username: String,
-    val userIv: String,
-    val password: String,
-    val passIv: String
-)
+const val USER_SECRET = "user_secret"
+const val PASS_SECRET = "pass_secret"
 
 object PreferencesKeys {
+    /**
+     * Not ideal to store a username or password with a plain text key
+     * that indicates what that value actually is. Keep 'em guessin
+     */
     val USERNAME = stringPreferencesKey("raspberry")
     val PASSWORD = stringPreferencesKey("blueberry")
-    val USERNAME_IV = stringPreferencesKey("nannyberry")
-    val PASSWORD_IV = stringPreferencesKey("boysenberry")
 }
 
 /**
  * Class that handles saving and retrieving user preferences
+ *
+ * @author Devin Martinolich
  */
 class UserPreferencesRepository(private val dataStore: DataStore<Preferences>, private val cryptoManager: CryptoManager) {
 
-    suspend fun <T> getPreference(key: Preferences.Key<T>, defaultValue: T): Flow<T> = dataStore.data
+    /**
+     * getPreference() returns a Flow<String> which can be observed within a ViewModel or Fragment/Activity
+     * This will emit a value ONLY when the value changes.
+     *
+     * @param key Preferences.Key<String>
+     * @return Flow<String>
+     * @author Devin Martinolich
+     */
+    suspend fun getPreference(key: Preferences.Key<String>): Flow<String> = dataStore.data
         .catch { exception ->
             // dataStore.data throws an IOException when an error is encountered when reading data
             if (exception is IOException) {
@@ -41,44 +48,74 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>, p
             }
         }
         .map { preferences ->
-            val result = preferences[key]?: defaultValue
+            val result = decryptValue(key, preferences[key] ?: "")
             result
         }
 
+    /**
+     * getFirstPreference() returns the LAST value of the first occurrence of a particular key.
+     * This is a hard way of collecting a value outside of observing the Flow
+     *
+     * @param key Preferences.Key<T>
+     * @param defaultValue T
+     * @return The last value of the first occurrence of a particular key
+     * @author Devin Martinolich
+     */
+    private suspend fun <T> getFirstPreference(key: Preferences.Key<T>, defaultValue: T) :
+            T = dataStore.data.first()[key] ?: defaultValue
+
+    /**
+     * getPrefDecrypted() is similar to getFirstPreference() however it will additionally attempt
+     * to decrypt the result instead of returning it without doing so.
+     *
+     * @param key
+     * @return The decrypted last value of the first occurrence of a particular key
+     * @author Devin Martinolich
+     */
+    suspend fun getPrefDecrypted(key: Preferences.Key<String>) : String = decryptValue(key, getFirstPreference(key, ""))
+
+    /**
+     * updateUsername() will encrypt and replace the stored username preference with a new in the
+     * format of username.iv
+     * This is in that format to keep the iv along with the username for decryption purposes.
+     *
+     * @param username String
+     * @author Devin Martinolich
+     */
     suspend fun updateUsername(username: String) {
         dataStore.edit {
-            val encryption = cryptoManager.encrypt(username.toByteArray())
-            it[PreferencesKeys.USERNAME] = encryption.value
-            it[PreferencesKeys.USERNAME_IV] = encryption.iv.toString()
+            val encryption = cryptoManager.encrypt(username, USER_SECRET)
+            it[PreferencesKeys.USERNAME] = encryption
         }
     }
 
+    /**
+     * updatePassword() will encrypt and replace the stored password preference with a new in the
+     * format of password.iv
+     * This is in that format to keep the iv along with the password for decryption purposes.
+     *
+     * @param password String
+     * @author Devin Martinolich
+     */
     suspend fun updatePassword(password: String) {
         dataStore.edit {
-            val encryption = cryptoManager.encrypt(password.toByteArray())
-            it[PreferencesKeys.PASSWORD] = encryption.value
-            it[PreferencesKeys.PASSWORD_IV] = encryption.iv.toString()
+            val encryption = cryptoManager.encrypt(password, PASS_SECRET)
+            it[PreferencesKeys.PASSWORD] = encryption
         }
     }
 
-    suspend fun getUsername(): String {
-        return decryptValue(PreferencesKeys.USERNAME, PreferencesKeys.USERNAME_IV)
-    }
-
-    suspend fun getPassword(): String {
-        return decryptValue(PreferencesKeys.PASSWORD, PreferencesKeys.PASSWORD_IV)
-    }
-
-    private suspend fun decryptValue(valueKey: Preferences.Key<String>, ivKey: Preferences.Key<String>): String {
-        var decrypted = ""
-        getPreference(valueKey, "").collect { value ->
-            getPreference(ivKey, "").collect { iv ->
-                if (value.isNotBlank() && iv.isNotBlank()) {
-                    decrypted =
-                        cryptoManager.decrypt(value.toByteArray(), iv.toByteArray()).toString()
-                }
-            }
-        }
-        return decrypted
+    /**
+     * decryptValue() will attempt to decrypt a provided value.
+     *
+     * @param key preference that is going to be decrypted Preferences.Key<String>
+     * @param value encrypted value String
+     * @return decrypted value String
+     * @author Devin Martinolich
+     */
+    private fun decryptValue(key: Preferences.Key<String>, value: String): String {
+        println("-> decryptValue(key=$key, value=$value)")
+        return if (value.isNotBlank()) {
+            cryptoManager.decrypt(value, if (key == PreferencesKeys.USERNAME) USER_SECRET else PASS_SECRET)
+        } else ""
     }
 }

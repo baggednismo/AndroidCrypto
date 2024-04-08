@@ -8,12 +8,16 @@ import androidx.compose.material.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.devinmartinolich.androidcrypto.AndroidCrypto.Companion.prefStore
 import com.devinmartinolich.androidcrypto.ui.theme.AndroidCryptoTheme
 import kotlinx.coroutines.launch
 
+const val keystore = "AndroidKeyStore"
+
 class MainActivity : ComponentActivity() {
 
-    private val pref by lazy { AndroidCrypto.appInstance?.userPrefRepo }
+    private val pref by lazy { AndroidCrypto.appInstance?.prefStore?.let {
+        UserPreferencesRepository(it, CryptoManager(keystore)) } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,7 +29,10 @@ class MainActivity : ComponentActivity() {
                 var password by remember {
                     mutableStateOf("")
                 }
-                var decrypted by remember {
+                var decryptedUser by remember {
+                    mutableStateOf("")
+                }
+                var decryptedPass by remember {
                     mutableStateOf("")
                 }
                 val scope = rememberCoroutineScope()
@@ -34,18 +41,18 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .padding(32.dp)
                 ) {
-                    TextField(
+                    OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(text = "Username") }
+                        label = { Text(text = "Username") }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
+                    OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text(text = "Password") }
+                        label = { Text(text = "Password") }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Row {
@@ -60,14 +67,22 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(onClick = {
                             scope.launch {
-                                decrypted = "${pref?.getUsername()} : ${pref?.getPassword()}"
+                                pref?.getPrefDecrypted(PreferencesKeys.USERNAME)?.let {
+                                    decryptedUser = it
+                                }
+
+                                pref?.getPrefDecrypted(PreferencesKeys.PASSWORD)?.let {
+                                    decryptedPass = it
+                                }
                             }
                         }) {
                             Text(text = "Load")
                         }
                     }
-                    Text(text = decrypted)
                     Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Decrypted User: $decryptedUser")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "Decrypted Pass: $decryptedPass")
                 }
             }
         }

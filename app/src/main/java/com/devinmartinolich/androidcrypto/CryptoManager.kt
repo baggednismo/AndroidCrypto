@@ -2,6 +2,7 @@ package com.devinmartinolich.androidcrypto
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Base64
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.KeyStore
@@ -10,37 +11,41 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.IvParameterSpec
 
-data class CryptoPaylod(
-    var value: String,
-    var iv: String? = null
-)
+class CryptoManager(keystore: String) {
 
-class CryptoManager {
+    companion object {
+        private const val ALGORITHM = KeyProperties.KEY_ALGORITHM_AES
+        private const val BLOCK_MODE = KeyProperties.BLOCK_MODE_CBC
+        private const val PADDING = KeyProperties.ENCRYPTION_PADDING_PKCS7
+        private const val TRANSFORMATION = "$ALGORITHM/$BLOCK_MODE/$PADDING"
+    }
 
-    private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply {
+    private val keyStore = KeyStore.getInstance(keystore).apply {
         load(null)
     }
 
-    private val encryptCipher get() = Cipher.getInstance(TRANSFORMATION).apply {
-        init(Cipher.ENCRYPT_MODE, getKey())
-    }
-
-    private fun getDecryptCipherForIv(iv: ByteArray): Cipher {
+    private fun encryptCipher(secret: String): Cipher {
         return Cipher.getInstance(TRANSFORMATION).apply {
-            init(Cipher.DECRYPT_MODE, getKey(), IvParameterSpec(iv))
+            init(Cipher.ENCRYPT_MODE, getKey(secret))
         }
     }
 
-    private fun getKey(): SecretKey {
-        val existingKey = keyStore.getEntry("secret", null) as? KeyStore.SecretKeyEntry
-        return existingKey?.secretKey ?: createKey()
+    private fun getDecryptCipherForIv(storedIv: ByteArray, secret: String): Cipher {
+        return Cipher.getInstance(TRANSFORMATION).apply {
+            init(Cipher.DECRYPT_MODE, getKey(secret), IvParameterSpec(storedIv))
+        }
     }
 
-    private fun createKey(): SecretKey {
+    private fun getKey(secret: String): SecretKey {
+        val existingKey = keyStore.getEntry(secret, null) as? KeyStore.SecretKeyEntry
+        return existingKey?.secretKey ?: createKey(secret)
+    }
+
+    private fun createKey(secret: String): SecretKey {
         return KeyGenerator.getInstance(ALGORITHM).apply {
             init(
                 KeyGenParameterSpec.Builder(
-                    "secret",
+                    secret,
                     KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
                 )
                     .setBlockModes(BLOCK_MODE)
@@ -52,47 +57,22 @@ class CryptoManager {
         }.generateKey()
     }
 
-    fun encrypt(bytes: ByteArray, outputStream: OutputStream): ByteArray {
-        val encryptedBytes = encryptCipher.doFinal(bytes)
-        outputStream.use {
-            it.write(encryptCipher.iv.size)
-            it.write(encryptCipher.iv)
-            it.write(encryptedBytes.size)
-            it.write(encryptedBytes)
-        }
-        return encryptedBytes
+    fun encrypt(clearText: String, secret: String): String {
+        val cipher = encryptCipher(secret)
+        val cipherText =
+            Base64.encodeToString(cipher.doFinal(clearText.toByteArray()), Base64.DEFAULT)
+        val iv = Base64.encodeToString(cipher.iv, Base64.DEFAULT)
+
+        return "$cipherText.$iv"
     }
 
-    fun decrypt(inputStream: InputStream): ByteArray {
-        return inputStream.use {
-            val ivSize = it.read()
-            val iv = ByteArray(ivSize)
-            it.read(iv)
+    fun decrypt(cipherText: String, secret: String): String {
+        val array = cipherText.split(".")
+        val cipherData = Base64.decode(array.first(), Base64.DEFAULT)
+        val iv = Base64.decode(array.last(), Base64.DEFAULT)
 
-            val encryptedBytesSize = it.read()
-            val encryptedBytes = ByteArray(encryptedBytesSize)
-            it.read(encryptedBytes)
+        val clearText = getDecryptCipherForIv(iv, secret).doFinal(cipherData)
 
-            getDecryptCipherForIv(iv).doFinal(encryptedBytes)
-        }
+        return String(clearText, 0, clearText.size, Charsets.UTF_8)
     }
-
-    fun encrypt(bytes: ByteArray): CryptoPaylod {
-        return CryptoPaylod(
-            value = encryptCipher.doFinal(bytes).toString(),
-            iv = encryptCipher.iv.toString()
-        )
-    }
-
-    fun decrypt(encryptedBytes: ByteArray, iv: ByteArray): ByteArray {
-        return getDecryptCipherForIv(iv).doFinal(encryptedBytes)
-    }
-
-    companion object {
-        private const val ALGORITHM = KeyProperties.KEY_ALGORITHM_AES
-        private const val BLOCK_MODE = KeyProperties.BLOCK_MODE_CBC
-        private const val PADDING = KeyProperties.ENCRYPTION_PADDING_PKCS7
-        private const val TRANSFORMATION = "$ALGORITHM/$BLOCK_MODE/$PADDING"
-    }
-
 }

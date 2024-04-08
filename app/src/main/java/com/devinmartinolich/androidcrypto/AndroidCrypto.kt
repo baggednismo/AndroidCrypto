@@ -6,12 +6,6 @@ import androidx.datastore.preferences.preferencesDataStore
 
 class AndroidCrypto: Application() {
 
-    private val Context.prefStore by preferencesDataStore(
-        name = USER_PREFERENCES_NAME
-    )
-
-    val userPrefRepo = UserPreferencesRepository(prefStore, CryptoManager())
-
     override fun onCreate() {
         super.onCreate()
 
@@ -19,8 +13,14 @@ class AndroidCrypto: Application() {
     }
 
     companion object {
+        private const val USER_PREFERENCES_NAME = "user_preferences"
+
         var appInstance: AndroidCrypto? = null
             private set
+
+        val Context.prefStore by preferencesDataStore(
+            name = USER_PREFERENCES_NAME
+        )
     }
 
 }
